@@ -5,8 +5,8 @@ This document outlines best practices for writing high-performance Go code.
 While some discussions will be made for making individual services faster
 (caching, etc), designing performant distributed systems is beyond the scope
 of this work. There are already good texts on monitoring and distributed
-system design. It encompasses an entirely different set of research and design
-trade-offs.
+system design. Optimizing distributed systems encompasses an entirely different
+set of research and design trade-offs.
 
 All the content will be licensed under CC-BY-SA.
 
@@ -360,11 +360,26 @@ applicable for programs on modern hardware dealing with huge amounts of data.
 
 * Custom compression format for your data
 
-  []byte (snappy, gzip, lz4), floating point (go-tsz), integers (delta, xor + huffman)
-  Lots of resources on compression.  Do you need to inspect the data or can it stay compressed?
-  Do you need random access or only streaming?  Compress blocks with extra index.
-  If not just in-process but written to disk, what about migration or adding/removing fields.
-  You'll now be dealing with raw []byte instead of nice structured Go types.
+  Compression algorithms depend very heavily on what is being compressed.  It's
+  best to choose one that suites your data.  If you have []byte, the something
+  like snappy, gzip, lz4, behaves well. For floating point data there is go-tsz
+  for time series and fpc for scientific data. Lots of research has been done
+  around compressing integers, generally for information retrieval in search
+  engines.  Examples include delta encoding and varints to more complex schemes
+  involving Huffman encoded xor-differences.  You can also come up with custom
+  compression formats optimized for exactly your data.
+
+  Do you need to inspect the data or can it stay compressed? Do you need random
+  access or only streaming?  If you need access to individual entries but don't
+  want to decompress the entire thing, you can compress the data in smaller
+  blocks and keep an index indicating what range of entries are in each block.
+  Access to a single entry just needs to check the index and unpack the smaller
+  data block.
+
+  If your data is not just in-process but will be written to disk, what about
+  data migration or adding/removing fields. You'll now be dealing with raw
+  []byte instead of nice structured Go types, so you'll need unsafe and to
+  consider serialization options.
 
 We will talk more about data layouts later.
 
@@ -557,8 +572,12 @@ your specific problem.  Mapping your problem into a domain that already has
 well-researched implementations can be a significant win.
 
 Similarly, using a simpler algorithm means that tradeoffs, analysis, and
-implementation deals are more likely to be more studied and well understood
+implementation details are more likely to be more studied and well understood
 than more esoteric or exotic and complex ones.
+
+Simpler algorithms can also be faster.  These two examples are not isolated cases
+  https://go-review.googlesource.com/c/crypto/+/169037
+  https://go-review.googlesource.com/c/go/+/170322/
 
 TODO: notes on algorithm selection
 
@@ -640,7 +659,7 @@ compiler optimization became slower once the compiler was improved.
 
 My RC6 cipher implementation had a 10% speed up for the inner loop just by
 switching to `encoding/binary` and `math/bits` instead of my hand-rolled
-version.
+versions.
 
 Similarly, the `compress/bzip2` package was sped by switching to [simpler
 code the compiler was better able to
@@ -705,26 +724,32 @@ service instances if the external cache is shared.
 A cache saves information you've just spent time computing in the hopes that
 you'll be able to reuse it again soon and save the computation time. A cache
 doesn't need to be complex.  Even storing a single item -- the most recently
-seen query/response -- can be a big win.
+seen query/response -- can be a big win, as seen in the `time.Parse()` example
+below.
 
-* Your cache doesn't even need to be huge.
-  * see `time.Parse()` example below; just a single value made an impact
-* But beware cache invalidation, concurrent access / updates, etc.
-* Random cache eviction is fast and sufficiently effective.
-* Random cache insertion can limit cache to popular items with minimal logic.
-* Compare cost (time, complexity) of cache logic to cost of refetching the data.
-* A large cache can increase GC pressure and keep blowing processor cache.
-* At the extreme (little or no eviction, caching all requests to an expensive function) this can turn into [memoization](https://en.wikipedia.org/wiki/Memoization)
+With caches it's important to compare the cost (in terms of actual wall-clock
+and code complexity) of your caching logic to simply refetching or recomputing
+the data.  The more complex algorithms that give higher hit rates are generally
+not cheap themselves.  Randomized cache eviction is simple and fast and can be
+effective in many cases.  Similarly, randomized cache *insertion* can limit your
+cache to only popular items with minimal logic.  While these may not be as effective
+as the more complex algorithms, the big improvement will be adding a cache in the first
+place: choosing exactly which caching algorithm gives only minor improvements.
 
-If in the real world repeated requests are sufficiently rare, it can be more
-expensive to keep cached responses around than to simply recompute them when
-needed.
+It's important to benchmark your choice of cache eviction algorithm with
+real-world traces. If in the real world repeated requests are sufficiently rare,
+it can be more expensive to keep cached responses around than to simply
+recompute them when needed. I've had services where testing with production data
+showed even an optimal cache wasn't worth it. we simply did't have sufficient
+repeated requests to make the added complexity of a cache make sense.
 
-I've done experiments with a network trace for a service that showed even an optimal
-cache wasn't worth it. Your expected hit ratio is important. You'll want to
-export the ratio to your monitoring stack. Changing ratios will show a
-shift in traffic. Then it's time to revisit the cache size or the
-expiration policy.
+Your expected cache hit ratio is important. You'll want to export the ratio to
+your monitoring stack. Changing ratios will show a shift in traffic. Then it's
+time to revisit the cache size or the expiration policy.
+
+A large cache can increase GC pressure. At the extreme (little or no eviction,
+caching all requests to an expensive function) this can turn into
+[memoization](https://en.wikipedia.org/wiki/Memoization)
 
 Program tuning:
 
@@ -744,16 +769,19 @@ Tunings can take many forms.
 * "Sufficient" means including edge cases, as those are the ones likely to get
    affected by tuning as you aim to improve performance in the general case.
 * Exploit a mathematical identity:
-  * <https://github.com/golang/go/commit/ed6c6c9c11496ed8e458f6e0731103126ce60223>
-  * <https://gist.github.com/dgryski/67e6a7ff94c3a1add30eb26ec0ad8b0f>
-  * multiplication with addition
-  * use WolframAlpha, Maxima, sympy and similar to specialize, optimize or create lookup-tables
-  * (Also, https://users.ece.cmu.edu/~franzf/papers/gttse07.pdf)
+  * Note that implementing and optimizing numerical calculations is almost its own field
+    * <https://github.com/golang/go/commit/ed6c6c9c11496ed8e458f6e0731103126ce60223>
+    * <https://gist.github.com/dgryski/67e6a7ff94c3a1add30eb26ec0ad8b0f>
+    * multiplication with addition
+    * use WolframAlpha, Maxima, sympy and similar to specialize, optimize or create lookup-tables
+    * (Also, https://users.ece.cmu.edu/~franzf/papers/gttse07.pdf)
+    * moving from floating point math to integer math
+    * or mandelbrot removing sqrt, or lttb removing abs,  `a < b/c` => `a * c < b`
+    * consider different number representations: fixed-point, floating-point, (smaller) integers,
+    * fancier: integers with error accumulators (e.g. Bresenham's line and circle), multi-base numbers / redundant number systems
   * "pay only for what you use, not what you could have used"
     * zero only part of an array, rather than the whole thing
   * best done in tiny steps, a few statements at a time
-  * moving from floating point math to integer math
-  * or mandelbrot removing sqrt, or lttb removing abs,  `a < b/c` => `a * c < b`
   * cheap checks before more expensive checks:
     * e.g., strcmp before regexp, (q.v., bloom filter before query)
     "do expensive things fewer times"
@@ -765,8 +793,6 @@ Tunings can take many forms.
   * remove bounds checks and nil checks from loops: https://go-review.googlesource.com/c/go/+/151158
   * other tricks for the prove pass
   * this is where pieces of Hacker's Delight fall
-  * consider different number representations: fixed-point, floating-point, (smaller) integers,
-    * fancier: integers with error accumulators (e.g. Bresenham's line and circle), multi-base numbers / redundant number systems
 
 Many folklore performance tips for tuning rely on poorly optimizing compilers
 and encourage the programmer to do these transformations by hand. Compilers
@@ -875,7 +901,7 @@ All optimizations should follow these steps:
     are 'sufficiently' different for an optimization to be worth the added
     code complexity.
 1. use <https://github.com/tsenart/vegeta> for load testing http services
-    (+ other fancy ones: k6, fortio, ...)
+    (+ other fancy ones: k6, fortio, fbender)
 1. make sure your latency numbers make sense
 
 The first step is important. It tells you when and where to start optimizing.
@@ -883,38 +909,6 @@ More importantly, it also tells you when to stop. Pretty much all optimizations
 add code complexity in exchange for speed. And you can *always* make code
 faster. It's a balancing act.
 
-## Tooling
-
-### Introductory Profiling
-
-Techniques applicable to source code in general
-
-1. Introduction to pprof
-   * go tool pprof (and <https://github.com/google/pprof>)
-1. Writing and running (micro)benchmarks
-   * profile, extract hot code to benchmark, optimize benchmark, profile.
-   * -cpuprofile / -memprofile / -benchmem
-   * 0.5 ns/op means it was optimized away -> how to avoid
-   * tips for writing good microbenchmarks (remove unnecessary work, but add baselines)
-1. How to read it pprof output
-1. What are the different pieces of the runtime that show up
-  * malloc, gc workers
-  * runtime.\_ExternalCode
-1. Macro-benchmarks (Profiling in production)
-   * net/http/pprof
-1. Using -base to look at differences
-1. Memory options: -inuse_space, -inuse_objects, -alloc_space, -alloc_objects
-1. Profiling in production; localhost+ssh tunnels, auth headers, using curl.
-1. How to read flame graphs
-
-### Tracer
-
-### Look at some more interesting/advanced tooling
-
-* other tooling in /x/perf
-* perf (perf2pprof)
-* intel vtune / amd codexl / apple instruments
-* https://godoc.org/github.com/aclements/go-perf
 
 ## Garbage Collection
 
@@ -941,6 +935,7 @@ allocate it. But you also pay every time the garbage collection runs.
 * use error variables instead of errors.New() / fmt.Errorf() at call site  (performance or style? interface requires pointer, so it escapes to heap anyway)
 * use structured errors to reduce allocation (pass struct value), create string at error printing time
 * size classes
+* beware pinning larger allocation with smaller substrings or slices
 
 ## Runtime and compiler
 
@@ -992,22 +987,27 @@ allocate it. But you also pay every time the garbage collection runs.
 
 Popular replacements for standard library packages:
 
-* encoding/json -> ffjson, easyjson, etc
+* encoding/json -> [ffjson](https://github.com/pquerna/ffjson), [easyjson](https://github.com/mailru/easyjson), [jingo](https://github.com/bet365/jingo) (only encoder), etc
 * net/http
-  * fasthttp (but incompatible API, not RFC compliant in subtle ways)
-  * httprouter (has other features besides speed; I've never actually seen routing in my profiles)
-* regexp -> ragel (or other regular expression package)
+  * [fasthttp](https://github.com/valyala/fasthttp/) (but incompatible API, not RFC compliant in subtle ways)
+  * [httprouter](https://github.com/julienschmidt/httprouter) (has other features besides speed; I've never actually seen routing in my profiles)
+* regexp -> [ragel](https://www.colm.net/open-source/ragel/) (or other regular expression package)
 * serialization
   * encoding/gob -> <https://github.com/alecthomas/go_serialization_benchmarks>
   * protobuf -> <https://github.com/gogo/protobuf>
-  * all formats have trade-offs: choose one that matches what you need
-    encoded space, decoding speed, language/tooling compatibility, ...
+  * all serialization formats have trade-offs: choose one that matches what you need
+    - Write heavy workload -> fast encoding speed
+    - Read-heavy workload -> fast decoding speed
+    - Other considerations: encoded size, language/tooling compatibility
 * database/sql -> has tradeoffs that affect performance
   *  look for drivers that don't use it: jackx/pgx, crawshaw sqlite, ...
 * gccgo (benchmark!), gollvm (WIP)
 * container/list: use a slice instead (almost always)
 
 ## cgo
+
+> cgo is not go
+> -- Rob Pike
 
 * Performance characteristics of cgo calls
 * Tricks to reduce the costs: batching
@@ -1047,7 +1047,7 @@ Techniques specific to the architecture running the code
     TODO: ASCII class counts example, with benchmarks
 
 * sorting data can help improve performance via both cache locality and branch prediction, even taking into account the time it takes to sort
-* function call overhead
+* function call overhead: inliner is getting better
 * reduce data copies
 
 * Comment about Jeff Dean's 2002 numbers (plus updates)
@@ -1090,17 +1090,26 @@ TODO: reasons parallel implementation might be slower (communication overhead, b
 * replace as little as possible to make an impact; maintenance cost is high
 * good reasons: SIMD instructions or other things outside of what Go and the compiler can provide
 * very important to benchmark: improvements can be huge (10x for go-highway)
-  zero (go-speck), or even slower (no inlining)
+  zero (go-speck/rc6/farm32), or even slower (no inlining)
 * rebenchmark with new versions to see if you can delete your code yet
    * TODO: link to 1.11 patches removing asm code
-* always have pure-Go version (noasm build tag): testing, arm, gccgo
+* always have pure-Go version (purego build tag): testing, arm, gccgo
 * brief intro to syntax
 * how to type the middle dot
-* calling convention
+* calling convention: everything is on the stack, followed by the return values.
+  - everything is on the stack, followed by the return values
+  - this might change https://github.com/golang/go/issues/18597
+  - https://science.raphael.poss.name/go-calling-convention-x86-64.html
 * using opcodes unsupported by the asm (asm2plan9, but this is getting rarer)
-* notes about why inline assembly is hard
-* all the tooling to make this easier: asmfmt, peachpy, c2goasm, ...
+* notes about why inline assembly is hard: https://github.com/golang/go/issues/26891
+* all the tooling to make this easier:
+  - asmfmt: gofmt for assembly https://github.com/klauspost/asmfmt
+  - c2goasm: convert assembly from gcc/clang to goasm https://github.com/minio/c2goasm
+   - go2asm: convert go to assembly you can link https://rsc.io/tmp/go2asm
+   - peachpy/avo: higher-level assembler in python (peachpy) or Go (avo)
+   - differences of above
 * https://github.com/golang/go/wiki/AssemblyPolicy
+* Design of the Go Assembler: https://talks.golang.org/2016/asm.slide
 
 ## Optimizing an entire service
 
@@ -1118,6 +1127,46 @@ tip.golang.org/doc/diagnostics.html
 * distributed tracing to track bottlenecks at a higher level
 * query patterns for querying a single server instead of in bulk
 * your performance issues may not be your code, but you'll have to work around them anyway
+* https://docs.microsoft.com/en-us/azure/architecture/antipatterns/
+
+## Tooling
+
+### Introductory Profiling
+
+This is a quick cheat-sheet for using the pprof tooling.  There are plenty of other guides available on this.
+Check out https://github.com/davecheney/high-performance-go-workshop.
+
+TODO(dgryski): videos?
+
+1. Introduction to pprof
+   * go tool pprof (and <https://github.com/google/pprof>)
+1. Writing and running (micro)benchmarks
+   * small, like unit tests
+   * profile, extract hot code to benchmark, optimize benchmark, profile.
+   * -cpuprofile / -memprofile / -benchmem
+   * 0.5 ns/op means it was optimized away -> how to avoid
+   * tips for writing good microbenchmarks (remove unnecessary work, but add baselines)
+1. How to read it pprof output
+1. What are the different pieces of the runtime that show up
+  * malloc, gc workers
+  * runtime.\_ExternalCode
+1. Macro-benchmarks (Profiling in production)
+   * larger, like end-to-end tests
+   * net/http/pprof, debug muxer
+   * because it's sampling, hitting 10 servers at 100hz is the same as hitting 1 server at 1000hz
+1. Using -base to look at differences
+1. Memory options: -inuse_space, -inuse_objects, -alloc_space, -alloc_objects
+1. Profiling in production; localhost+ssh tunnels, auth headers, using curl.
+1. How to read flame graphs
+
+### Tracer
+
+### Look at some more interesting/advanced tooling
+
+* other tooling in /x/perf
+* perf (perf2pprof)
+* intel vtune / amd codexl / apple instruments
+* https://godoc.org/github.com/aclements/go-perf
 
 ## Appendix: Implementing Research Papers
 
