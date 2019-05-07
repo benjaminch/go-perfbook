@@ -180,7 +180,7 @@ will give a skewed view of where the bottlenecks will be in the finished system.
 
 TODO: How to avoid/detect "Death by 1000 cuts" from poorly written software.
 Solution: "Premature pessimization is the root of all evil".  This matches with
-my Rule 1: Be deliberate.  You don't need to write every line of code to be code
+my Rule 1: Be deliberate.  You don't need to write every line of code 
 to be fast, but neither should by default do wasteful things.
 
 "Premature pessimization is when you write code that is slower than it needs to
@@ -206,7 +206,8 @@ also give you an idea of where to start. If you need only a 10-20%
 performance improvement, you can probably get that with some implementation
 tweaks and smaller fixes. If you need a factor of 10x or more, then just
 replacing a multiplication with a left-shift isn't going to cut it. That's
-probably going to call for changes up and down your stack.
+probably going to call for changes up and down your stack, possibly redesigning
+large portions of the system with these performance goals in mind.
 
 Good performance work requires knowledge at many different levels, from
 system design, networking, hardware (CPU, caches, storage), algorithms,
@@ -246,7 +247,7 @@ performance every 18 *months*. Algorithmic improvements work at larger magnitude
 Algorithms for mixed integer programming [improved by a factor of 30,000
 between 1991 and 2008](https://agtb.wordpress.com/2010/12/23/progress-in-algorithms-beats-moore%E2%80%99s-law/).
 For a more concrete example, consider [this breakdown](https://medium.com/@buckhx/unwinding-uber-s-most-efficient-service-406413c5871d)
-of replacing a brute force geo-spacial algorithm described in an Uber blog post with
+of replacing a brute force geo-spatial algorithm described in an Uber blog post with
 more specialized one more suited to the presented task. There is no compiler switch
 that will give you an equivalent boost in performance.
 
@@ -430,7 +431,7 @@ The basic classes of complexity are:
 
 * O(1): a field access, array or map lookup
 
-  Advice: don't worry about it
+  Advice: don't worry about it (but keep in mind the constant factor.)
 
 * O(log n): binary search
 
@@ -466,6 +467,12 @@ O(n log n) time. If you're doing lots of searches, then the upfront cost of
 sorting will pay off. On the other hand, if you're mostly doing lookups,
 maybe having an array was the wrong choice and you'd be better off paying the
 O(1) lookup cost for a map instead.
+
+Being able to analyze your problem in terms of big-O notation also means you can
+figure out if you're already at the limit for what is possible for your problem,
+and if you need to change approaches in order to speed things up.  For example,
+finding the minimum of an unsorted list is `O(n)`, because you have to look at
+every single item.  There's no way to make that faster.
 
 If your data structure is static, then you can generally do much better than
 the dynamic case. It becomes easier to build an optimal data structure
@@ -902,6 +909,7 @@ All optimizations should follow these steps:
     code complexity.
 1. use <https://github.com/tsenart/vegeta> for load testing http services
     (+ other fancy ones: k6, fortio, fbender)
+    - if possible, test ramp-up/ramp-down in addition to steady-state load
 1. make sure your latency numbers make sense
 
 The first step is important. It tells you when and where to start optimizing.
@@ -925,6 +933,7 @@ allocate it. But you also pay every time the garbage collection runs.
 * API design to limit allocations:
   * allow passing in buffers so caller can reuse rather than forcing an allocation
   * you can even modify a slice in place carefully while you scan over it
+  * passing in a struct could allow caller to stack allocate it
 * reducing pointers to reduce gc scan times
   * pointer-free slices
   * maps with both pointer-free keys and values
@@ -964,6 +973,7 @@ allocate it. But you also pay every time the garbage collection runs.
   * but "off-heap", so ignored by gc (but so would a pointerless slice)
 * need to think about serialization format: how to deal with pointers, indexing (mph, index header)
 * speedy de-serialization
+* binary wire protocol to struct when you already have the buffer
 * string <-> slice conversion, []byte <-> []uint32, ...
 * int to bool unsafe hack (but cmov) (but != 0 is also branch-free)
 * padding:
@@ -999,6 +1009,7 @@ Popular replacements for standard library packages:
     - Write heavy workload -> fast encoding speed
     - Read-heavy workload -> fast decoding speed
     - Other considerations: encoded size, language/tooling compatibility
+    - tradeoffs of packed binary formats vs. self-describing text formats
 * database/sql -> has tradeoffs that affect performance
   *  look for drivers that don't use it: jackx/pgx, crawshaw sqlite, ...
 * gccgo (benchmark!), gollvm (WIP)
@@ -1021,7 +1032,7 @@ Techniques specific to the architecture running the code
 * introduction to CPU caches
   * performance cliffs
   * building intuition around cache-lines: sizes, padding, alignment
-  * OS tools to view cache-misses
+  * OS tools to view cache-misses (perf)
   * maps vs. slices
   * SOA vs AOS layouts: row-major vs. column major; when you have an X, do you need another X or do you need a Y?
   * temporal and spacial locality: use what you have and what's nearby as much as possible
@@ -1048,7 +1059,7 @@ Techniques specific to the architecture running the code
 
 * sorting data can help improve performance via both cache locality and branch prediction, even taking into account the time it takes to sort
 * function call overhead: inliner is getting better
-* reduce data copies
+* reduce data copies (including for repeated large lists of function params)
 
 * Comment about Jeff Dean's 2002 numbers (plus updates)
   * cpus have gotten faster, but memory hasn't kept up
@@ -1216,7 +1227,7 @@ different tradeoffs that were reasonable in the 70s or 80s but don't
 necessarily apply to your use case. For example, what they determine to be
 "reasonable" memory vs. disk usage tradeoffs. Memory sizes are now orders of
 magnitude larger, and SSDs have altered the latency penalty for using disk.
-Simiarly, some streaming algorithms are designed for router hardware, which
+Similarly, some streaming algorithms are designed for router hardware, which
 can make it a pain to translate into software.
 
 Make sure the assumptions the algorithm makes about your data hold.
