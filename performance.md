@@ -30,7 +30,7 @@ We can summarize these three sections as:
 I'm putting this first because it's really the most important step. Should
 you even be doing this at all?
 
-Every optimization has a cost. Generally this cost is expressed in terms of
+Every optimization has a cost. Generally, this cost is expressed in terms of
 code complexity or cognitive load -- optimized code is rarely simpler than
 the unoptimized version.
 
@@ -81,7 +81,7 @@ faster while maintaining correctness, robustness, and clarity."
 
 Premature optimization can also hurt you by tying you into certain decisions.
 The optimized code can be harder to modify if requirements change and harder to
-throw away (sunk-cost falacy) if needed.
+throw away (sunk-cost fallacy) if needed.
 
 [BitFunnel performance estimation](http://bitfunnel.org/strangeloop) has some
 numbers that make this trade-off explicit. Imagine a hypothetical search
@@ -92,7 +92,7 @@ developer spending an entire year to improve performance by only 1% will pay
 for itself.
 
 In the vast majority of cases, the size and speed of a program is not a concern.
-Easiest optimization is not having to do it. The second easiest optimization
+The easiest optimization is not having to do it. The second easiest optimization
 is just buying faster hardware.
 
 Once you've decided you're going to change your program, keep reading.
@@ -101,7 +101,7 @@ Once you've decided you're going to change your program, keep reading.
 
 ### Optimization Workflow
 
-Before we get into the specifics, lets talk about the general process of
+Before we get into the specifics, let's talk about the general process of
 optimization.
 
 Optimization is a form of refactoring. But each step, rather than improving
@@ -132,7 +132,8 @@ negative change. Always make sure you undo your fix in these cases.
 The benchmarks you are using must be correct and provide reproducible numbers
 on representative workloads. If individual runs have too high a variance, it
 will make small improvements more difficult to spot. You will need to use
-[benchstat](https://golang.org/x/perf/benchstat) or equivalent statistical tests and won't be able to just eyeball it.
+[benchstat](https://golang.org/x/perf/benchstat) or equivalent statistical tests 
+and won't be able just to eyeball it.
 (Note that using statistical tests is a good idea anyway.) The steps to run
 the benchmarks should be documented, and any custom scripts and tooling
 should be committed to the repository with instructions for how to run them.
@@ -173,7 +174,7 @@ Simon Eskildsen has a talk from SRECon covering this topic in more depth:
 [Advanced Napkin Math: Estimating System Performance from First Principles](https://www.youtube.com/watch?v=IxkSlnrRFqc)
 
 Finally, Jon Bentley's "Programming Pearls" has a chapter titled "The Back of
-the Envelope" covering Fermi problems.  Sadly, these kind of estimation skills
+the Envelope" covering Fermi problems.  Sadly, these kinds of estimation skills
 got a bad wrap thanks to their use in Microsoft style "puzzle interview
 questions" in the 1990s and early 2000s.
 
@@ -224,7 +225,7 @@ large portions of the system with these performance goals in mind.
 Good performance work requires knowledge at many different levels, from
 system design, networking, hardware (CPU, caches, storage), algorithms,
 tuning, and debugging. With limited time and resources, consider which level
-will give the most improvement: it won't always be algorithm or program
+will give the most improvement: it won't always be an algorithm or program
 tuning.
 
 In general, optimizations should proceed from top to bottom. Optimizations at
@@ -283,7 +284,7 @@ The Three Optimization Questions:
 Jon Bentley's 1982 work "Writing Efficient Programs" approached program
 optimization as an engineering problem: Benchmark. Analyze. Improve. Verify.
 Iterate. A number of his tips are now done automatically by compilers. A
-programmers job is to use the transformations compilers *can't* do.
+programmer's job is to use the transformations compilers *can't* do.
 
 There are summaries of the book:
 
@@ -302,7 +303,8 @@ you can either change your data or you can change your code.
 Changing your data means either adding to or altering the representation of
 the data you're processing. From a performance perspective, some of these
 will end up changing the O() associated with different aspects of the data
-structure.
+structure. This may even include preprocessing the input to be in a
+different, more useful format.
 
 Ideas for augmenting your data structure:
 
@@ -351,10 +353,36 @@ These are all clear examples of "do less work" at the data structure level.
 They all cost space. Most of the time if you're optimizing for CPU, your
 program will use more memory. This is the classic [space-time trade-off](https://en.wikipedia.org/wiki/Space%E2%80%93time_tradeoff).
 
+It's important to examine how this tradeoff can affect your solutions -- it's
+not always straight-forward. Sometimes a small amount of memory can give a
+significant speed, sometimes the tradeoff is linear (2x memory usage == 2x
+performance speedup), sometimes it's significantly worse: a huge amount of
+memory gives only a small speedup. Where you need to be on this
+memory/performance curve can affect what algorithm choices are reasonable.
+It's not always possible to just tune an algorithm parameter. Different
+memory usages might be completely different algorithmic approaches.
+
+Lookup tables also fall into this space-time trade-off. A simple lookup table
+might just be a cache of previously requested computations.
+
+If the domain is small enough, the *entire* set of results could be
+precomputed and stored in the table. As an example, this could be the
+approach taken for a fast popcount implementation, where by the number of set
+bits in byte is stored in a 256-entry table. A larger table could store the
+bits required for all 16-bit words. In this case, they're storing exact
+results.
+
+A number of algorithms for trigonometric functions use lookup tables as a
+starting point for a calculation.
+
 If your program uses too much memory, it's also possible to go the other way.
 Reduce space usage in exchange for increased computation. Rather than storing
 things, calculate them every time. You can also compress the data in memory
 and decompress it on the fly when you need it.
+
+If the data you're processing is on disk, instead of loading everything into
+RAM, you could create an index for the pieces you need and keep that in
+memory, or pre-process the file into smaller workable chunks.
 
 [Small Memory Software](http://smallmemory.com/book.html) is a book available
 online covering techniques for reducing the space used by your programs.
@@ -410,6 +438,7 @@ addressed this directly, comparing performance on both a contended and
 uncontended processor cache. (See graphs 4 and 5 in the Jump Hash paper)
 
 TODO: how to simulate a contended cache, show incremental cost
+TODO: sync.Map as a Go-ish example of cache-contention addressing
 
 Another aspect to consider is data-transfer time. Generally network and disk
 access is very slow, and so being able to load a compressed chunk will be
@@ -508,7 +537,7 @@ array is faster to insert but it's unsorted: at the end to "finalize" you
 need to do the sorting all at once.
 
 When writing a package to be used by others, avoid the temptation to
-optimize up front for every single use case. This will result in unreadable
+optimize upfront for every single use case. This will result in unreadable
 code. Data structures by design are effectively single-purpose. You can
 neither read minds nor predict the future. If a user says "Your package is
 too slow for this use case", a reasonable answer might be "Then use this
@@ -562,6 +591,9 @@ effectively random access of chasing a pointer. Still, it's best to begin
 with a good algorithm. We will talk about this in the hardware-specific
 section.
 
+TODO: extending last paragraph, mention O() notation is an model where each 
+operation has fixed cost. That's a wrong assumption on modern hardware. 
+
 > The fight may not always go to the strongest, nor the race to the fastest,
 but that's the way to bet.
 > -- <cite>Rudyard Kipling</cite>
@@ -603,14 +635,59 @@ TODO: notes on algorithm selection
 TODO:
   improve worst-case behaviour at slight cost to average runtime
   linear-time regexp matching
-  randomized algorithms: MC vs. LV
-    improve worse-case running time
-    skip-list, treap, randomized marking,
-    primality testing, randomized pivot for quicksort
-    power of two random choices
+
+While most algorithms are deterministic, there are a class of algorithms that
+use randomness as a way to simplify otherwise complex decision making step.
+Instead of having code that does the Right Thing, you use randomness to
+select a probably not *bad* thing. For example, a treap is a
+probabilistically balanced binary tree. Each node has a key, but also is
+assigned a random value. When inserting into the tree, the normal binary tree
+insertion path is followed but the nodes also obey the heap property based
+on each nodes randomly assigned weight. This simpler approach replaces
+otherwise complicated tree rotating solutions (like AVL and Red Black trees)
+but still maintains a balanced tree with O(log n) insert/lookup "with high
+probability.  Skip lists are another similar, simple data structure that uses
+randomness to produce "probably" O(log n) insertion and lookups.
+
+Similarly, choosing a random pivot for quicksort can be simpler than a more
+complex median-of-medians approach to finding a good pivot, and the
+probability that bad pivots are continually (randomly) chosen and degrading
+quicksort's performance to O(n^2) is vanishingly small.
+
+Randomized algorithms are classed as either "Monte Carlo" algorithms or "Las
+Vegas" algorithms, after two well known gambling locations. A Monte Carlo
+algorithm gambles with correctness: it might output a wrong answer (or in the
+case of the above, an unbalanced binary tree). A Las Vegas algorithm always
+outputs a correct answer, but might take a very long time to terminate.
+
+Another well-known example of a randomized algorithm is the Miller-Rabin
+primality testing algorithm. Each iteration will output either "not prime" or
+"maybe prime". While "not prime" is certain, the "maybe prime" is correct
+with probability at least 1/2. That is, there are non-primes for which "maybe
+prime" will still be output. By running many iterations of Miller-Rabin, we
+can make the probability of failure (that is, outputing "maybe prime" for a
+composite number) as small as we'd like. If it passes 200 iterations, then we
+can say the number is composite with probability at most 1/(2^200).
+
+Another area where randomness plays a part is called "The power of two random
+choices". While initially the research was applied to load balancing, it
+turned out to be widely applicable to a number of selection problems. The
+idea is that rather than trying to find the best selection out of a group of
+items, pick two at random and select the best from that. Returning to load
+balancing (or hash table chains), the power of two random choices reduces the
+expected load (or hash chain length) from O(log n) items to O(log log n)
+items. For more information, see [The Power of Two Random Choices: A Survey of Techniques and Results](https://www.eecs.harvard.edu/~michaelm/postscripts/handbook2001.pdf)
+
+randomized algorithms:
+    other caching algorithms
     statistical approximations (frequently depend on sample size and not population size)
 
  TODO: batching to reduce overhead: https://lemire.me/blog/2018/04/17/iterating-in-batches-over-data-structures-can-be-much-faster/
+
+TODO: - Algorithm Design Manual: http://algorist.com/algorist.html
+      - How To Solve It By Computer
+      - to what extent is this a "how to write algorithms" book?  If you're going to change
+      the code to speed it up, by definition you're writing new algorithms.  Soo... maybe?
 
 ### Benchmark Inputs
 
@@ -646,12 +723,12 @@ benchmark input consists only a single query, then every request will hit the
 cache giving potentially a very unrealistic view of how the system will behave
 in the real world with a more varied request pattern.
 
-Also note that some issues that are not apparent on your laptop might be visible
+Also, note that some issues that are not apparent on your laptop might be visible
 once you deploy to production and are hitting 250k reqs/second on a 40 core
 server. Similarly, the behaviour of the garbage collector during benchmarking
 can misrepresent real-world impact.  There are (rare) cases where a
 microbenchmark will show a slow-down, but real-world performance improves.
-Microbenchmarks can help nudge you in the right direction, but being able to
+Microbenchmarks can help nudge you in the right direction but being able to
 fully test the impact of a change across the entire system is best.
 
 Writing good benchmarks can be difficult.
@@ -924,6 +1001,8 @@ All optimizations should follow these steps:
     - if possible, test ramp-up/ramp-down in addition to steady-state load
 1. make sure your latency numbers make sense
 
+TODO: mention github.com/aclements/perflock as cpu noise reduction tool
+
 The first step is important. It tells you when and where to start optimizing.
 More importantly, it also tells you when to stop. Pretty much all optimizations
 add code complexity in exchange for speed. And you can *always* make code
@@ -1076,6 +1155,8 @@ Techniques specific to the architecture running the code
 
 * Comment about Jeff Dean's 2002 numbers (plus updates)
   * cpus have gotten faster, but memory hasn't kept up
+
+TODO: little comment about code-aligment free optimization (or unoptimization)
 
 ## Concurrency
 
