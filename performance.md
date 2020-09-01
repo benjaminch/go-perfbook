@@ -68,7 +68,7 @@ should not pass up our opportunities in that critical 3%."
 >
 > -- <cite>Knuth</cite>
 
-Add: https://www.youtube.com/watch?time_continue=429&v=RT46MpK39rQ
+Add: https://www.youtube.com/watch?time_continue=429&v=3WBaY61c9sE
    * don't ignore the easy optimizations
    * more knowledge of algorithms and data structures makes more optimizations "easy" or "obvious"
 
@@ -980,6 +980,9 @@ had optimized process startup time with a complex set of mmap, reflect, and
 unsafe. Once we changed how the system was deployed, this code was no longer
 required and I replaced it with much more readable regular file operations.
 
+TODO(dgryski): hash function work should fall here; manually inlining, removing structs,
+unrolling loops, removing bounds checks
+
 ### Optimization workflow summary
 
 All optimizations should follow these steps:
@@ -1296,6 +1299,16 @@ faster.
 > The fastest algorithm can frequently be replaced by one that is almost as fast and much easier to understand.
 >
 > -- <cite>Douglas W. Jones, University of Iowa</cite>
+
+and
+
+>    Rule 3. Fancy algorithms are slow when n is small, and n is usually small.
+>    Fancy algorithms have big constants. Until you know that n is frequently going
+>    to be big, don't get fancy.
+>
+>    Rule 4. Fancy algorithms are buggier than simple ones, and they're much
+>    harder to implement. Use simple algorithms as well as simple data structures.
+> -- <cite>"Notes on C Programming" (Rob Pike, 1989)</cite>
 
 The added complexity has to be enough that the payoff is actually worth it.
 Another example is cache eviction algorithms. Different algorithms can have
